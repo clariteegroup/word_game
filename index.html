@@ -1,0 +1,539 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>MiniWord — daily word game</title>
+<style>
+  :root{
+    --bg:#0f1724; --panel:#071028; --tile:#111827;
+    --text:#e6eef8; --muted:#9fb0c8;
+    --green:#16a34a; --yellow:#f59e0b; --gray:#374151;
+    --accent:#2563eb;
+    --tile-size:64px;
+  }
+  html,body{height:100%;background:linear-gradient(180deg,#041028 0%, #071428 100%);margin:0;font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial}
+  .app{max-width:550px;margin:24px auto;padding:18px;background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));border-radius:12px;color:var(--text);box-shadow:0 6px 24px rgba(2,6,23,0.6)}
+  header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+  h1{font-size:20px;margin:0;letter-spacing:0.4px}
+  .sub{color:var(--muted);font-size:13px}
+  .grid{display:grid;grid-template-rows:repeat(6, var(--tile-size));gap:8px;justify-content:center;margin:8px 0}
+  .row{display:grid;grid-template-columns:repeat(5, var(--tile-size));gap:8px}
+  .tile{width:var(--tile-size);height:var(--tile-size);display:flex;align-items:center;justify-content:center;background:var(--tile);border-radius:8px;font-weight:700;font-size:28px;color:var(--text);text-transform:uppercase;user-select:none}
+  .tile.flip{transition:transform .45s;transform-style:preserve-3d}
+  .tile.revealed{color:white}
+  .tile.locked{pointer-events:none}
+  .tile.green{background:linear-gradient(180deg,var(--green), #0b7a33)}
+  .tile.yellow{background:linear-gradient(180deg,var(--yellow), #d77a06)}
+  .tile.gray{background:linear-gradient(180deg,var(--gray), #1f2937);opacity:0.95}
+  .keyboard{display:grid;gap:8px;grid-template-rows:repeat(3,48px);margin-top:12px;justify-items:center}
+  .kb-row{display:flex;gap:8px}
+  .key{padding:10px 12px;border-radius:6px;background:#0b1624;border:1px solid rgba(255,255,255,0.03);color:var(--text);font-weight:600;cursor:pointer;user-select:none}
+  .key.wide{padding:10px 18px}
+  .key.green{background:var(--green);color:#01210f}
+  .key.yellow{background:var(--yellow);color:#2a1400}
+  .key.gray{background:var(--gray);color:#c9d4df}
+  .controls{display:flex;gap:8px;align-items:center}
+  .btn{background:transparent;border:1px solid rgba(255,255,255,0.06);padding:8px 10px;border-radius:8px;color:var(--muted);cursor:pointer}
+  .stats{display:flex;gap:12px;align-items:center;margin-top:12px;color:var(--muted);font-size:13px;flex-wrap:wrap}
+  .modal{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(2,6,23,0.6);z-index:40}
+  .sheet{background:linear-gradient(180deg,#072037,#061428);padding:18px;border-radius:12px;max-width:540px;color:var(--text);box-shadow:0 10px 40px rgba(2,6,23,0.6)}
+  .close{margin-left:auto;color:var(--muted);cursor:pointer}
+  footer{margin-top:12px;color:var(--muted);font-size:12px;text-align:center}
+  .loading{padding:10px 12px;background:rgba(255,255,255,0.02);border-radius:8px;color:var(--muted);display:inline-block}
+  @media (max-width:520px){
+    :root{--tile-size:52px}
+    .app{margin:10px;padding:12px}
+  }
+</style>
+</head>
+<body>
+<div class="app" role="application" aria-label="MiniWord daily guess game">
+  <header>
+    <div>
+      <h1>MiniWord</h1>
+      <div class="sub">Daily 5-letter word • 6 guesses</div>
+    </div>
+    <div class="controls">
+      <div id="loading" class="loading">Loading words…</div>
+      <button id="helpBtn" class="btn" title="How to play">How to play</button>
+      <button id="shareBtn" class="btn" title="Share result">Share</button>
+      <button id="resetBtn" class="btn" title="Clear progress">Clear</button>
+    </div>
+  </header>
+
+  <main>
+    <div id="message" class="sub" aria-live="polite" style="min-height:20px"></div>
+    <div id="grid" class="grid" aria-hidden="false"></div>
+
+    <div class="keyboard" id="keyboard" aria-hidden="false" style="margin-bottom:8px;">
+      <div class="kb-row" id="row1"></div>
+      <div class="kb-row" id="row2"></div>
+      <div class="kb-row" id="row3"></div>
+    </div>
+
+    <div class="stats" id="stats">
+      <div>Played: <strong id="played">0</strong></div>
+      <div>Win %: <strong id="winRate">0</strong></div>
+      <div>Current: <strong id="currentStreak">0</strong></div>
+      <div>Best: <strong id="bestStreak">0</strong></div>
+    </div>
+  </main>
+
+  <footer>
+    Embeddable daily word game • Host on GitHub Pages • Uses open-source word lists
+  </footer>
+</div>
+
+<!-- Simple modal template -->
+<div id="modal" class="modal" style="display:none">
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <div style="display:flex;align-items:center">
+      <strong id="modal-title">How to play</strong>
+      <div id="closeModal" class="close">✕</div>
+    </div>
+    <div style="margin-top:12px;color:var(--muted);line-height:1.4">
+      Guess the daily 5-letter word in 6 attempts. After each guess the color of the tiles will change to show how close your guess was to the word.
+      Green: correct letter & position. Yellow: letter in word, wrong position. Gray: not in the word.
+      Your progress is saved locally. Use Share to copy an emoji summary of your guesses.
+    </div>
+  </div>
+</div>
+
+<script>
+/*
+  MiniWord v2 — repo-ready
+  - Loads full ANSWERS and ALLOWED lists from public raw URLs (or local files if present)
+  - Keeps original Wordle list behavior and daily UTC-based rotation
+  - Embeddable in an iframe
+  - LocalStorage stats and daily progress saved
+*/
+
+/* NETWORK SOURCES (open-source lists).
+   By default we try these public raw files; if you prefer hosting your own copies,
+   place `/answers.txt` and `/allowed.txt` at the same host root and we'll use them.
+*/
+const ANSWERS_URLS = [
+  // Common public list mirrors; fallback order. You can replace these with your hosted copies.
+  'https://raw.githubusercontent.com/tabatkins/wordle-list/main/answers.txt',
+  'https://raw.githubusercontent.com/charlesreid1/five-letter-words/master/answers.txt',
+  '/answers.txt' // local file in repo (if present)
+];
+const ALLOWED_URLS = [
+  'https://raw.githubusercontent.com/tabatkins/wordle-list/main/allowed-guesses.txt',
+  'https://raw.githubusercontent.com/charlesreid1/five-letter-words/master/allowed.txt',
+  '/allowed.txt' // local file
+];
+
+const STORAGE_KEY = 'miniworld_v2_stats';
+const DAILY_KEY = 'miniworld_v2_daily';
+
+let ANSWERS = []; // will be populated
+let ALLOWED = []; // will be populated
+
+/* Small built-in fallback (kept short to avoid huge bundle). Used only if remote fetch fails. */
+const FALLBACK_ANSWERS = ["arise","civic","brave","brain","bring","brown","candy","carry","clean","clear","climb","coach","count","court","cover","crazy","cream","crime","dance","dairy","dream","drink","drive","earth","first","fresh","front","green","group","guide","happy","hotel","house","inner","issue","judge","label","large","later","laugh","local","model","money","movie","music","night","novel","ocean","other","phone","place","plant","point","pride","prime","quick","radio","raise","range","rapid","ready","rebel","river","round","royal","salon","scale","share","short","skill","smile","sound","space","stage","start","state","steam","still","stone","store","story","study","style","table","taste","teach","theme","think","today","trade","train","treat","trust","under","union","value","visit","voice","watch","water","white","world","young"];
+const FALLBACK_ALLOWED = [...FALLBACK_ANSWERS, "about","above","actor","adapt","admit","adopt","agree","alarm","alive","allow","alone","along","amber","among","anger","apply","arena","argue","aroma","arrow","asset","audio","avoid","award","aware","bacon","badge","baker","ballet","blink","blend","board","boost","brand","bread","break","bring","broad","brush","cable","catch","chant","check","chill","china","class","click","clock","close","could","cover","crash","cream","crime","cross","crowd","crown","daily","dance","dated","death","delay","depth","doubt","dozen","draft","drama","dress","drive","drove","dying","eager","early","earth","elect","empty","enemy","entry","equal","error","event","every","exact","exist","extra","faith","false","favor","feast","fence","field","fight","final","first","flash","fleet","float","floor","focus","force","forth","found","frame","fresh","front","fruit","funny","giant","given","glass","glory","grace","grade","grand","grant","grasp","grass","grave","great","green","greet","group","guard","guess","guest","guide","habit","happy","harsh","hasty","heart","heavy","hence","henry","hotel","house","human","ideal","image","imply","index","inner","input","issue","jelly","joint","judge","juice","jumpy","known","label","labor","large","laser","later","learn","leave","legal","level","light","limit","local","logic","lucky","lumen","lunar","major","maker","march","match","maybe","metal","meter","merry","might","minor","model","money","month","moral","motor","mount","mouse","mouth","movie","music","naive","naval","noble","noise","north","novel","nurse","occur","ocean","often","older","olive","order","other","outer","owner","paint","panel","panic","paper","party","peace","phase","phone","photo","piano","piece","pilot","pitch","place","plain","plane","plant","plate","point","poker","pride","prime","prize","proof","proud","pulse","punch","purse","queen","quick","quiet","radio","raise","rally","range","rapid","ratio","reach","react","ready","realm","rebel","reign","relax","relay","renew","reply","repel","river","robot","rough","round","route","royal","rural","salad","salon","sauce","scale","scare","scene","scent","serve","shame","shape","share","shark","sheer","shelf","shift","shine","shirt","shock","shoot","shore","short","sight","silly","silver","skate","skill","sleep","slice","slope","small","smart","smile","smoke","snack","sound","south","space","speak","speed","spend","spice","spite","split","spoke","sport","staff","stage","stain","stair","stamp","stand","start","state","steam","steel","stick","still","stock","stone","store","storm","story","stove","strip","study","stuff","style","sugar","suite","super","swing","table","taste","teach","teeth","thank","theme","thick","thing","think","third","those","three","throw","tight","title","today","topic","total","touch","tough","tower","track","trade","train","treat","trend","trial","trust","truth","twice","under","union","unity","urban","usage","usual","valid","value","video","vital","visit","vocal","voice","waste","watch","water","wheel","where","which","while","white","whole","woman","world","worry","would","write","wrong","young","youth"];
+
+function tryFetchOne(urls){
+  // try fetch from first URL that works
+  return new Promise(async (resolve)=>{
+    for(let u of urls){
+      if(!u) continue;
+      try{
+        const resp = await fetch(u, {cache: "no-store"});
+        if(!resp.ok) throw new Error('bad');
+        const text = await resp.text();
+        const lines = text.split(/\r?\n/).map(s=>s.trim().toLowerCase()).filter(s=>/^[a-z]{5}$/.test(s));
+        if(lines.length) return resolve(lines);
+      }catch(e){
+        // try next
+      }
+    }
+    resolve(null);
+  });
+}
+
+/* Utility: deterministic index for the day (UTC) -> selects answer */
+function dailyIndexForDate(dateStr){
+  // djb2
+  let hash = 5381;
+  for(let i=0;i<dateStr.length;i++) hash = ((hash<<5) + hash) + dateStr.charCodeAt(i);
+  return Math.abs(hash) % ANSWERS.length;
+}
+
+function getTodayDateStringUTC(){
+  const d = new Date();
+  return d.getUTCFullYear() + '-' + String(d.getUTCMonth()+1).padStart(2,'0') + '-' + String(d.getUTCDate()).padStart(2,'0');
+}
+
+/* Game state */
+let state = {
+  guesses: [],
+  current: '',
+  solved: false,
+  attempts: 6,
+  answerIndex: 0,
+  answer: '',
+  day: getTodayDateStringUTC()
+};
+
+/* Stats */
+function loadStats(){
+  const raw = localStorage.getItem(STORAGE_KEY);
+  if(raw) {
+    try{ return JSON.parse(raw);}catch(e){}
+  }
+  return {played:0, wins:0, currentStreak:0, bestStreak:0, lastPlayedDay: null, guessesByWin:{} };
+}
+function saveStats(s){ localStorage.setItem(STORAGE_KEY, JSON.stringify(s)); }
+
+/* Daily progress */
+function loadDailyProgress(){
+  const raw = localStorage.getItem(DAILY_KEY);
+  if(!raw) return null;
+  try{
+    const d = JSON.parse(raw);
+    if(d.day === state.day) return d;
+  }catch(e){}
+  return null;
+}
+function saveDailyProgress(){
+  localStorage.setItem(DAILY_KEY, JSON.stringify({
+    day: state.day,
+    answerIndex: state.answerIndex,
+    guesses: state.guesses,
+    solved: state.solved
+  }));
+}
+
+/* DOM refs */
+const gridEl = document.getElementById('grid');
+const messageEl = document.getElementById('message');
+const shareBtn = document.getElementById('shareBtn');
+const resetBtn = document.getElementById('resetBtn');
+const helpBtn = document.getElementById('helpBtn');
+const modal = document.getElementById('modal');
+const closeModal = document.getElementById('closeModal');
+const loadingEl = document.getElementById('loading');
+const statsEls = {
+  played: document.getElementById('played'),
+  winRate: document.getElementById('winRate'),
+  currentStreak: document.getElementById('currentStreak'),
+  bestStreak: document.getElementById('bestStreak')
+};
+const keyboardRows = {
+  row1: document.getElementById('row1'),
+  row2: document.getElementById('row2'),
+  row3: document.getElementById('row3')
+};
+
+const KEYS = ["QWERTYUIOP","ASDFGHJKL","ZXCVBNM"];
+
+/* Build keyboard */
+function createKeyboard(){
+  for(let i=0;i<3;i++){
+    const row = KEYS[i];
+    for(let ch of row){
+      const b = document.createElement('div');
+      b.textContent = ch;
+      b.className = 'key';
+      b.dataset.key = ch;
+      b.addEventListener('click', ()=>onKey(ch));
+      keyboardRows['row'+(i+1)].appendChild(b);
+    }
+  }
+  const enter = document.createElement('div');
+  enter.textContent = 'ENTER';
+  enter.className = 'key wide';
+  enter.dataset.key = 'ENTER';
+  enter.addEventListener('click', ()=>onKey('ENTER'));
+  keyboardRows.row3.insertBefore(enter, keyboardRows.row3.firstChild);
+
+  const back = document.createElement('div');
+  back.textContent = '⌫';
+  back.className = 'key wide';
+  back.dataset.key = 'BACK';
+  back.addEventListener('click', ()=>onKey('BACK'));
+  keyboardRows.row3.appendChild(back);
+}
+
+/* Grid rendering */
+function renderGrid(){
+  gridEl.innerHTML = '';
+  for(let r=0;r<6;r++){
+    const row = document.createElement('div'); row.className='row';
+    for(let c=0;c<5;c++){
+      const tile = document.createElement('div'); tile.className='tile'; tile.dataset.r=r; tile.dataset.c=c;
+      tile.textContent = '';
+      row.appendChild(tile);
+    }
+    gridEl.appendChild(row);
+  }
+}
+
+/* Fill grid */
+function refreshGrid(){
+  const rows = gridEl.children;
+  for(let r=0;r<6;r++){
+    const row = rows[r];
+    const guess = state.guesses[r] || '';
+    for(let c=0;c<5;c++){
+      const tile = row.children[c];
+      tile.className = 'tile';
+      tile.textContent = (guess[c]||'').toUpperCase();
+      if(r < state.guesses.length){
+        const evaluation = evaluateGuess(guess, state.answer);
+        const color = evaluation[c];
+        tile.classList.add('revealed');
+        if(color==='correct') tile.classList.add('green');
+        else if(color==='present') tile.classList.add('yellow');
+        else tile.classList.add('gray');
+      } else if(r === state.guesses.length){
+        tile.textContent = (state.current[c]||'').toUpperCase();
+      }
+    }
+  }
+  updateKeyboard();
+}
+
+/* Evaluate guess */
+function evaluateGuess(guess, answer){
+  guess = guess.toLowerCase(); answer = answer.toLowerCase();
+  const res = Array(5).fill('absent');
+  const answerArr = answer.split('');
+  for(let i=0;i<5;i++){
+    if(guess[i] === answerArr[i]){
+      res[i] = 'correct';
+      answerArr[i] = null;
+    }
+  }
+  for(let i=0;i<5;i++){
+    if(res[i] === 'correct') continue;
+    const idx = answerArr.indexOf(guess[i]);
+    if(idx !== -1){
+      res[i] = 'present';
+      answerArr[idx] = null;
+    }
+  }
+  return res;
+}
+
+/* Keyboard update */
+function updateKeyboard(){
+  const keys = document.querySelectorAll('.key[data-key]');
+  const statuses = {};
+  for(let g of state.guesses){
+    const evals = evaluateGuess(g, state.answer);
+    for(let i=0;i<5;i++){
+      const ch = g[i].toUpperCase();
+      const val = evals[i];
+      const cur = statuses[ch];
+      if(!cur || (cur === 'present' && val === 'correct') || (cur === 'absent' && (val==='present'||val==='correct'))){
+        statuses[ch] = val;
+      }
+    }
+  }
+  keys.forEach(k=>{
+    const key = k.dataset.key;
+    if(key==='ENTER' || key==='BACK') return;
+    const st = statuses[key];
+    k.classList.remove('green','yellow','gray');
+    if(st==='correct') k.classList.add('green');
+    else if(st==='present') k.classList.add('yellow');
+    else if(st==='absent') k.classList.add('gray');
+  });
+}
+
+/* Input */
+function onKey(key){
+  if(state.solved) return;
+  if(key === 'ENTER'){
+    submitGuess();
+  } else if(key === 'BACK'){
+    state.current = state.current.slice(0,-1);
+    refreshGrid();
+  } else {
+    if(state.current.length < 5 && /^[A-Z]$/.test(key)){
+      state.current += key.toLowerCase();
+      refreshGrid();
+    }
+  }
+}
+
+/* Submit */
+function submitGuess(){
+  if(state.current.length !== 5) {
+    showMessage('Not enough letters');
+    return;
+  }
+  const guess = state.current.toLowerCase();
+  if(!ALLOWED.includes(guess)){
+    showMessage('Word not in list');
+    return;
+  }
+  state.guesses.push(guess);
+  state.current = '';
+  saveDailyProgress();
+  refreshGrid();
+  const lastEval = evaluateGuess(guess, state.answer);
+  if(lastEval.every(v=>v==='correct')){
+    winGame();
+  } else if(state.guesses.length >= state.attempts){
+    loseGame();
+  } else {
+    showMessage('');
+  }
+}
+
+/* Message */
+let msgTimer = null;
+function showMessage(text, timeout=2000){
+  messageEl.textContent = text;
+  if(msgTimer) clearTimeout(msgTimer);
+  if(timeout) msgTimer = setTimeout(()=>{ messageEl.textContent = ''; }, timeout);
+}
+
+/* Stats */
+let stats = loadStats();
+function updateStatsUI(){
+  const played = stats.played || 0;
+  const wins = stats.wins || 0;
+  const winRate = played ? Math.round((wins/played)*100) : 0;
+  statsEls.played.textContent = played;
+  statsEls.winRate.textContent = winRate;
+  statsEls.currentStreak.textContent = stats.currentStreak || 0;
+  statsEls.bestStreak.textContent = stats.bestStreak || 0;
+}
+
+/* End games */
+function winGame(){
+  state.solved = true;
+  showMessage('Nice! You solved it!');
+  stats.played = (stats.played||0) + 1;
+  stats.wins = (stats.wins||0) + 1;
+  stats.currentStreak = ( (stats.lastPlayedDay && isConsecutiveDay(stats.lastPlayedDay, state.day) ) ? (stats.currentStreak||0)+1 : 1 );
+  stats.bestStreak = Math.max(stats.bestStreak||0, stats.currentStreak);
+  stats.lastPlayedDay = state.day;
+  saveStats(stats);
+  saveDailyProgress();
+  updateStatsUI();
+}
+
+function loseGame(){
+  state.solved = false;
+  showMessage('Out of attempts — the word was: ' + state.answer.toUpperCase(), 4000);
+  stats.played = (stats.played||0) + 1;
+  stats.currentStreak = 0;
+  stats.lastPlayedDay = state.day;
+  saveStats(stats);
+  saveDailyProgress();
+  updateStatsUI();
+}
+
+function isConsecutiveDay(prevDay, curDay){
+  const pd = new Date(prevDay + 'T00:00:00Z');
+  const cd = new Date(curDay + 'T00:00:00Z');
+  const diff = (cd - pd) / (1000*60*60*24);
+  return diff === 1;
+}
+
+/* Share */
+function buildEmojiShare(){
+  const squares = {correct:'🟩', present:'🟨', absent:'⬜'};
+  let out = `MiniWord ${state.day}\n`;
+  if(state.solved){
+    out += `${state.guesses.length}/${state.attempts}\n\n`;
+  } else {
+    out += `X/${state.attempts}\n\n`;
+  }
+  for(let g of state.guesses){
+    const ev = evaluateGuess(g, state.answer);
+    out += ev.map(e=>squares[e]).join('') + '\n';
+  }
+  out += '\nPlay: ' + location.origin + location.pathname;
+  return out;
+}
+async function copyText(t){
+  try{
+    await navigator.clipboard.writeText(t);
+    showMessage('Result copied to clipboard!');
+  }catch(e){
+    showMessage('Copy failed (browser blocked)');
+  }
+}
+
+/* Reset for same day */
+function resetDayProgress(){
+  state.guesses = [];
+  state.current = '';
+  state.solved = false;
+  saveDailyProgress();
+  renderGrid();
+  refreshGrid();
+  showMessage('Progress cleared for today.', 1500);
+}
+
+/* Initialize from storage */
+function initFromStorage(){
+  const saved = loadDailyProgress();
+  if(saved){
+    state.guesses = saved.guesses || [];
+    state.solved = saved.solved || false;
+  }
+}
+
+/* Initialize app — after loading lists */
+function initApp(){
+  createKeyboard();
+  renderGrid();
+  initFromStorage();
+  refreshGrid();
+  updateStatsUI();
+
+  window.addEventListener('keydown', (e)=>{
+    if(e.key === 'Enter') onKey('ENTER');
+    else if(e.key === 'Backspace') onKey('BACK');
+    else if(/^[a-zA-Z]$/.test(e.key)) onKey(e.key.toUpperCase());
+  });
+
+  shareBtn.addEventListener('click', ()=>{
+    const txt = buildEmojiShare();
+    copyText(txt);
+  });
+
+  resetBtn.addEventListener('click', ()=>resetDayProgress());
+  helpBtn.addEventListener('click', ()=>{ modal.style.display='flex';});
+  closeModal.addEventListener('click', ()=>{ modal.style.display='none';});
+  modal.addEventListener('click', (ev)=>{ if(ev.target === modal) modal.style.display='none'; });
+}
+
+/* Load word lists (try multiple sources, fallback to built-in) */
+async function loadLists(){
+  loadingEl.textContent = 'Loading words…';
+  let answers = await tryFetchOne(ANSWERS_URLS);
+  let allowed = await tryFetchOne(ALLOWED_URLS);
+
+  if(!answers) answers = FALLBACK_ANSWERS;
+  if(!allowed) allowed = FALLBACK_ALLOWED;
+
+  // Ensure allowed includes answers
+  const allowedSet = new Set(allowed);
+  for(const w of answers) allowedSet.add(w);
+  ALLOWED = Array.from(allowedSet);
+  ANSWERS = answers;
+
+  // finalize state
+  state.answerIndex = dailyIndexForDate(getTodayDateStringUTC());
+  state.answer = ANSWERS[state.answerIndex];
+  state.day = getTodayDateStringUTC();
+
+  loadingEl.style.display = 'none';
+  initApp();
+}
+
+/* On load */
+loadLists();
+</script>
+</body>
+</html>
