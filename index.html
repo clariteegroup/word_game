@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>MiniWord — daily word game</title>
+<style>
+  :root{--tile-size:64px}
+  body{font-family:Inter, system-ui, sans-serif;padding:1rem;background:#071428;color:#e6eef8}
+  .app{max-width:800px;margin:0 auto}
+  .definition{color:#bcd; margin-top:0.5rem;}
+  button{background:#2563eb;color:#fff;border:none;padding:8px 12px;border-radius:6px;cursor:pointer}
+  .note{color:#9fb0c8;font-size:0.95rem;margin-top:0.25rem}
+</style>
+</head>
+<body>
+  <div class="app">
+    <h1>MiniWord</h1>
+    <p class="note">Uses scheduled answers from <code>answers.txt</code> and shows short definitions from <code>descriptions.json</code> when a word is revealed.</p>
+
+    <div style="margin-top:1.2rem">
+      <button id="reveal">Reveal today's answer</button>
+      <button id="refresh" style="margin-left:8px">Reload lists</button>
+    </div>
+
+    <div id="answer" style="font-size:1.5rem;margin-top:0.8rem"></div>
+    <div id="definition" class="definition" aria-live="polite"></div>
+
+    <div style="margin-top:1.2rem;color:#9fb0c8;font-size:0.95rem">
+      Start date mapping: <strong>2026-01-07</strong> → first line of <code>answers.txt</code> (UTC day mapping).
+    </div>
+  </div>
+
+<script>
+const START_DATE = '2026-01-07'; // line 1 of answers.txt maps to this UTC date
+
+async function loadText(path){
+  try{
+    const r = await fetch(path, {cache:'no-store'});
+    if(!r.ok) throw new Error('not found');
+    const txt = await r.text();
+    return txt.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+  }catch(e){
+    return null;
+  }
+}
+
+async function loadJSON(path){
+  try{
+    const r = await fetch(path, {cache:'no-store'});
+    if(!r.ok) throw new Error('not found');
+    return await r.json();
+  }catch(e){
+    return null;
+  }
+}
+
+function daysSince(start){
+  const s = new Date(start + 'T00:00:00Z');
+  const now = new Date();
+  const sd = Date.UTC(s.getUTCFullYear(), s.getUTCMonth(), s.getUTCDate());
+  const nd = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  return Math.floor((nd - sd) / (24*60*60*1000));
+}
+
+let ANSWERS = [];
+let DESCS = {};
+
+async function loadResources(){
+  document.getElementById('answer').textContent = '';
+  document.getElementById('definition').textContent = 'Loading lists…';
+  const a = await loadText('/answers.txt') || await loadText('answers.txt') || [];
+  const d = await loadJSON('/descriptions.json') || await loadJSON('descriptions.json') || {};
+  ANSWERS = a;
+  DESCS = d;
+  document.getElementById('definition').textContent = '';
+  if(!ANSWERS.length){
+    document.getElementById('definition').textContent = 'No answers found. Ensure answers.txt exists in the repo root or wait for CI to generate it.';
+  }
+}
+
+function scheduledAnswerForToday(){
+  if(!ANSWERS.length) return null;
+  const idx = daysSince(START_DATE);
+  // if index out of range, wrap (safer fallback)
+  const i = ((idx % ANSWERS.length) + ANSWERS.length) % ANSWERS.length;
+  return ANSWERS[i];
+}
+
+document.getElementById('reveal').addEventListener('click', ()=>{
+  const ans = scheduledAnswerForToday();
+  const ansEl = document.getElementById('answer');
+  const defEl = document.getElementById('definition');
+  if(!ans){
+    ansEl.textContent = '';
+    defEl.textContent = 'Answer not available yet.';
+    return;
+  }
+  ansEl.textContent = ans.toUpperCase();
+  const def = DESCS[ans] || DESCS[ans.toLowerCase()] || '';
+  defEl.textContent = def || 'Definition not available.';
+});
+
+document.getElementById('refresh').addEventListener('click', async ()=>{
+  await loadResources();
+  document.getElementById('definition').textContent = 'Lists reloaded.';
+  setTimeout(()=>{ document.getElementById('definition').textContent = ''; }, 1500);
+});
+
+// load at startup
+loadResources();
+</script>
+</body>
+</html>
